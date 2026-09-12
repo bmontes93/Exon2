@@ -139,10 +139,31 @@ class ExecuteFaceSynthesisUseCase:
                     enhanced_aligned, IM, (w_img, h_img), borderMode=cv2.BORDER_REPLICATE
                 )
 
-                # Canonical feathered boundary mask
-                mask_512 = np.ones((512, 512), dtype=np.float32)
-                mask_512 = cv2.erode(mask_512, np.ones((15, 15), np.uint8))
-                mask_512 = cv2.GaussianBlur(mask_512, (31, 31), 0)
+                # Anatomical Face Mask (Prevents square bounding box artifacts in background)
+                if target_crop.landmark_2d_106 is not None:
+                    lmk_homo = np.hstack([np.array(target_crop.landmark_2d_106, dtype=np.float32), np.ones((106, 1), dtype=np.float32)])
+                    lmk_512 = (M @ lmk_homo.T).T
+
+                    jaw_512 = lmk_512[0:33]
+                    brow_l_512 = lmk_512[43:52]
+                    brow_r_512 = lmk_512[97:106]
+                    all_brows_512 = np.vstack([brow_l_512, brow_r_512])
+
+                    forehead_512 = all_brows_512.copy()
+                    forehead_512[:, 1] -= 70.0  # Offset up into forehead/hairline
+
+                    face_pts_512 = np.vstack([jaw_512, all_brows_512, forehead_512])
+                    hull_512 = cv2.convexHull(face_pts_512.astype(np.int32))
+
+                    mask_512 = np.zeros((512, 512), dtype=np.float32)
+                    cv2.fillConvexPoly(mask_512, hull_512, 1.0)
+                    mask_512 = cv2.erode(mask_512, np.ones((11, 11), np.uint8))
+                    mask_512 = cv2.GaussianBlur(mask_512, (35, 35), 12)
+                else:
+                    mask_512 = np.zeros((512, 512), dtype=np.float32)
+                    cv2.ellipse(mask_512, (256, 290), (130, 170), 0, 0, 360, 1.0, -1)
+                    mask_512 = cv2.GaussianBlur(mask_512, (41, 41), 15)
+
                 warp_mask = cv2.warpAffine(mask_512, IM, (w_img, h_img))
                 warp_mask_3c = np.dstack([warp_mask] * 3)
 
